@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Detective Terminal</title>
+    <script src="https://cdn.socket.io/4.5.1/socket.io.min.js"></script>
+    <style>
+        body {
+            background: #111; color: #0f0; font-family: 'Courier New', sans-serif;
+            text-align: center; padding: 0; margin: 0;
+            display: flex; flex-direction: column; height: 100vh;
+            overflow: hidden; user-select: none;
+        }
+
+        button {
+            background: #003300; color: #0f0; border: 1px solid #0f0;
+            padding: 15px; font-size: 18px; width: 100%; margin: 5px 0;
+            border-radius: 4px; font-weight: bold; cursor: pointer;
+        }
+        button:active { background: #0f0; color: #000; }
+
+        input[type="text"] {
+            width: 100%; padding: 15px; font-size: 16px; box-sizing: border-box;
+            margin-bottom: 15px; border: 1px solid #0f0; background: #000; color: #0f0;
+        }
+
+        #setup-area, #game-ui, #vote-ui, #result-ui, #evidence-ui {
+            display: none; padding: 20px; flex-grow: 1; flex-direction: column; justify-content: center;
+        }
+        #setup-area { display: flex; }
+
+        #connection-status { margin: 20px 0; font-size: 14px; color: #555; }
+        .connected { color: #0f0 !important; }
+
+        .status-bar { color: #0f0; border-bottom: 1px solid #0f0; padding-bottom: 10px; margin-bottom: 20px; font-size: 14px; }
+        
+        .gauge-container {
+            margin: 20px auto; width: 100%; height: 20px; background: #222;
+            border: 1px solid #0f0; position: relative;
+        }
+        .gauge-marker {
+            width: 10px; height: 100%; background: #0f0;
+            position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+            transition: left 0.1s;
+        }
+
+        /* 証拠品モード（4分割） */
+        #evidence-grid {
+            display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; flex-grow: 1; position: relative;
+        }
+        .ev-btn {
+            width: 100%; height: 100%; margin: 0; font-size: 14px; word-break: break-all;
+            background: #002200; border: 1px solid #005500;
+        }
+        .ev-btn:active { background: #0f0; color: #000; }
+        
+        /* 戻るボタン */
+        #ev-back-btn {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 80px; height: 80px; border-radius: 50%;
+            background: #000; border: 2px solid #0f0; color: #0f0; font-size: 12px; z-index: 10;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="setup-area">
+        <h1>DETECTIVE TERMINAL</h1>
+        <div id="connection-status">通信待機中...</div>
+        <p style="font-size:12px; color:#aaa;">センサー許可が必要です</p>
+        <button id="btn-join" onclick="reqPerm()">任務参加 (CONNECT)</button>
+    </div>
+
+    <div id="game-ui">
+        <div class="status-bar">PHASE: INTERROGATION</div>
+        <input type="text" id="q-input" placeholder="質問を入力...">
+        <div style="display:flex; gap:10px;">
+            <button onclick="playBtnSound(); sendQ('all')">全員</button>
+            <button onclick="playBtnSound(); sendQ('one')">指名</button>
+        </div>
+        
+        <div class="gauge-container">
+            <div id="pointer-marker" class="gauge-marker"></div>
+        </div>
+        <p style="font-size:12px; color:#888;">傾けて選択</p>
+
+        <div style="margin-top:20px;"></div>
+        <button onclick="playBtnSound(); showEvidenceMode()" style="border-color:#0aa; color:#0aa;">🔍 証拠品を調べる</button>
+
+        <div style="flex-grow:1;"></div>
+        <button onclick="playBtnSound(); socket.emit('change_phase', 'VOTING')" style="background:#550; color:#fff; border-color:#ff0; margin-bottom:80px;">告発へ移行</button>
+    </div>
+
+    <div id="evidence-ui">
+        <div class="status-bar" style="color:#0aa; border-color:#0aa;">EVIDENCE INSPECTION</div>
+        <div id="evidence-grid">
+            <button class="ev-btn" id="ev-btn-0" onclick="inspect(0)">Ev.1</button>
+            <button class="ev-btn" id="ev-btn-1" onclick="inspect(1)">Ev.2</button>
+            <button class="ev-btn" id="ev-btn-2" onclick="inspect(2)">Ev.3</button>
+            <button class="ev-btn" id="ev-btn-3" onclick="inspect(3)">Ev.4</button>
+            
+            <div id="ev-back-btn" onclick="playBtnSound(); backToGame()">戻る</div>
+        </div>
+        <p style="color:#0aa; font-size:12px; margin-top:10px;">タップして解析（各1回のみ）</p>
+    </div>
+    
+    <div id="vote-ui">
+        <div class="status-bar" style="color:red; border-color:red;">PHASE: ACCUSATION</div>
+        <div style="color:#aaa; margin-bottom:20px;">犯人を指名して執行せよ</div>
+        
+        <div class="gauge-container" style="border-color:red;">
+             <div id="pointer-marker-vote" class="gauge-marker" style="background:red;"></div>
+        </div>
+
+        <button onclick="playBtnSound(); socket.emit('execute_vote', {target:'NPC'})" style="background:#300; border-color:red; color:red; margin-top:40px; padding:20px;">執行 (EXECUTE)</button>
+        <button onclick="playBtnSound(); socket.emit('change_phase', 'ASKING')" style="border-color:#555; color:#aaa; margin-top:20px;">← 尋問に戻る</button>
+    </div>
+
+    <div id="result-ui">
+        <h2 style="color:#0f0;">CASE CLOSED</h2>
+        <p style="color:#ccc;">PC画面で解説を確認してください</p>
+        <button onclick="playBtnSound(); socket.emit('reset_game')" style="margin-top:30px; padding:30px; background:#004d40;">次の事件へ (NEXT CASE)</button>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentPhase = 'WAITING_START';
+        let isJoined = false; 
+        let currentGamma = 0;
+        let evidenceList = []; 
+
+        const btnSound = new Audio('カーソル移動8.mp3');
+        function playBtnSound() {
+            btnSound.currentTime = 0;
+            btnSound.play().catch(()=>{});
+        }
+
+        socket.on('connect', () => {
+            const status = document.getElementById('connection-status');
+            status.innerText = "● サーバー接続完了";
+            status.classList.add('connected');
+        });
+        
+        socket.on('disconnect', () => {
+            const status = document.getElementById('connection-status');
+            status.innerText = "× 切断されました";
+            status.classList.remove('connected');
+            isJoined = false;
+            updateScreen();
+        });
+
+        async function reqPerm() {
+            playBtnSound();
+            if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+                try { await DeviceOrientationEvent.requestPermission(); } catch(e){}
+            }
+            startSensor();
+            isJoined = true;
+            socket.emit('shake_action'); 
+            updateScreen();
+        }
+
+        function startSensor() {
+            window.addEventListener('deviceorientation', (e) => {
+                if(e.gamma !== null) {
+                    currentGamma = e.gamma;
+                    socket.emit('sensor', { room: 'game', g: e.gamma });
+                    
+                    let pct = ((Math.max(-30, Math.min(30, e.gamma)) + 30) / 60) * 100;
+                    document.getElementById('pointer-marker').style.left = `${pct}%`;
+                    document.getElementById('pointer-marker-vote').style.left = `${pct}%`;
+                }
+            });
+        }
+        
+        function sendQ(type) {
+            const text = document.getElementById('q-input').value;
+            if(!text) return;
+            socket.emit('ask_question', { text, type });
+            document.getElementById('q-input').value = '';
+        }
+
+        function showEvidenceMode() {
+            document.getElementById('game-ui').style.display = 'none';
+            document.getElementById('evidence-ui').style.display = 'flex';
+        }
+        function backToGame() {
+            document.getElementById('evidence-ui').style.display = 'none';
+            document.getElementById('game-ui').style.display = 'flex';
+        }
+        function inspect(index) {
+            playBtnSound();
+            socket.emit('inspect_evidence', index);
+            if(navigator.vibrate) navigator.vibrate(50);
+        }
+
+        socket.on('game_data', (data) => {
+            if(data.evidenceNames) {
+                evidenceList = data.evidenceNames;
+                evidenceList.forEach((name, i) => {
+                    const btn = document.getElementById(`ev-btn-${i}`);
+                    if(btn) btn.innerText = name;
+                });
+            }
+        });
+
+        socket.on('phase_change', (p) => {
+            currentPhase = p;
+            updateScreen();
+        });
+
+        socket.on('game_over', () => {
+            currentPhase = 'RESULT';
+            updateScreen();
+        });
+
+        function updateScreen() {
+            ['setup-area', 'game-ui', 'vote-ui', 'result-ui', 'evidence-ui'].forEach(id => {
+                document.getElementById(id).style.display = 'none';
+            });
+
+            if (!isJoined) {
+                document.getElementById('setup-area').style.display = 'flex';
+                const btn = document.getElementById('btn-join');
+                btn.innerText = (currentPhase !== 'WAITING_START') ? "途中参加 (JOIN)" : "任務参加 (CONNECT)";
+                return;
+            }
+
+            // ロード中表示
+            if(currentPhase === 'PREPARING' || currentPhase === 'TUTORIAL') {
+                document.getElementById('setup-area').style.display = 'flex';
+                document.getElementById('btn-join').innerText = "事件を読み込んでいます...";
+            } 
+            else if (currentPhase === 'WAITING_START') {
+                document.getElementById('setup-area').style.display = 'flex';
+                document.getElementById('btn-join').innerText = "任務開始 (CONNECT)";
+            }
+            else if (currentPhase === 'ASKING') {
+                document.getElementById('game-ui').style.display = 'flex';
+            }
+            else if (currentPhase === 'VOTING') {
+                document.getElementById('vote-ui').style.display = 'flex';
+            }
+            else if (currentPhase === 'RESULT') {
+                document.getElementById('result-ui').style.display = 'flex';
+            }
+        }
+        
+        socket.on('reset', () => window.location.reload());
+        socket.emit('join', 'game');
+    </script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Mystery Detective</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdn.socket.io/4.5.1/socket.io.esm.min.js" type="module"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #080808; color: #e0e0e0; font-family: 'Shippori Mincho', serif; }
+        .bg-noise { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAABZJREFUeNpi2r9//38gYGAEESAAEGAAasgJOgzOKCoAAAAASUVORK5CYII='); opacity: 0.05; pointer-events: none; z-index: -1; }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: grid; grid-template-rows: 90px 240px 1fr; grid-template-columns: 1fr 1fr; gap: 20px; padding: 20px; box-sizing: border-box; z-index: 10; }
+        header { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-bottom: 1px solid #333; }
+        h1 { margin: 0; font-size: 32px; color: #d4af37; text-shadow: 0 0 10px rgba(212, 175, 55, 0.5); }
+        .summary { color: #aaa; font-size: 14px; margin-top: 5px; }
+        .details-badge { background: #800; color: #fff; padding: 2px 10px; border-radius: 4px; font-size: 14px; margin-top: 5px; border: 1px solid #f00; }
+        #suspects-area { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; align-items: center; justify-items: center; }
+        .suspect-card { width: 90%; height: 100%; background: rgba(20, 20, 20, 0.8); border: 1px solid #444; border-radius: 8px; padding: 15px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; transition: all 0.2s; position: relative; }
+        .suspect-card.selected { border-color: #d4af37; background: rgba(50, 40, 10, 0.9); transform: scale(1.05); }
+        .suspect-name { font-size: 26px; font-weight: bold; color: #d4af37; margin-bottom: 5px; }
+        .suspect-stmt { font-size: 13px; color: #ccc; text-align: center; width: 100%; overflow: hidden; text-overflow: ellipsis; }
+        #left-panel { grid-column: 1 / 2; display: flex; flex-direction: column; gap: 10px; overflow: hidden; height: 100%; }
+        .panel-title { color: #d4af37; border-bottom: 1px solid #444; margin-bottom: 5px; font-size: 18px; }
+        #evidence-list { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+        .evidence-card { background: #1a1a1a; border-left: 3px solid #d4af37; padding: 8px 12px; font-size: 13px; width: 45%; box-sizing: border-box; }
+        #log-area { flex-grow: 1; background: rgba(0,0,0,0.5); border: 1px solid #333; overflow-y: auto; padding: 10px; font-family: sans-serif; font-size: 14px; min-height: 0; }
+        .log-entry { margin-bottom: 8px; border-bottom: 1px solid #222; padding-bottom: 4px; }
+        .log-q { color: #88ccff; font-weight: bold; }
+        .log-a { color: #ffaaaa; margin-left: 10px; line-height: 1.4; }
+        #right-panel { grid-column: 2 / 3; background: rgba(20, 10, 10, 0.2); border: 1px solid #522; padding: 15px; display: flex; flex-direction: column; overflow: hidden; height: 100%; }
+        #key-testimony-list { overflow-y: auto; flex-grow: 1; min-height: 0; }
+        .key-item { background: rgba(100, 0, 0, 0.2); border: 1px solid #a33; padding: 10px; margin-bottom: 10px; border-radius: 4px; animation: flash 1s; }
+        .key-target { color: #d4af37; font-weight: bold; font-size: 14px; }
+        .key-text { color: #fff; font-size: 15px; margin-top: 5px; }
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; transition: opacity 0.5s; }
+        .hidden { opacity: 0; pointer-events: none; }
+        .tutorial-box { max-width: 800px; padding: 40px; border: 2px solid #d4af37; background: #111; }
+        .shake-icon { font-size: 60px; animation: shake 1.5s infinite; margin-top: 20px; }
+        #result-content { max-width: 800px; text-align: left; max-height: 60vh; overflow-y: auto; padding: 20px; background: #111; border: 1px solid #444; }
+        .result-label { color: #d4af37; font-size: 16px; margin-top: 20px; border-bottom: 1px solid #444; }
+        .result-text { color: white; font-size: 18px; line-height: 1.6; margin-top: 10px; }
+        @keyframes shake { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } }
+        @keyframes flash { 0% { background: #fff; } 100% { background: rgba(100,0,0,0.2); } }
+    </style>
+</head>
+<body>
+    <div class="bg-noise"></div>
+    <div id="intro-overlay" class="overlay">
+        <h1 style="font-size:60px; margin-bottom:20px;">Mystery Detective</h1>
+        <div style="font-size:24px; color:#aaa;">スマホを接続し、任務に参加してください</div>
+        <div class="shake-icon">📱</div>
+    </div>
+    <div id="tutorial-overlay" class="overlay hidden">
+        <div class="tutorial-box">
+            <h2 style="color:#d4af37;">捜査マニュアル</h2>
+            <div style="text-align:left; font-size:20px; line-height:1.8; color:#ccc;">
+                <b>1. 現場検証</b><br>証拠品は全員に関連している。矛盾を探せ。<br>
+                <b>2. 聞き込み</b><br>スマホから質問を送れ。<br>
+                <b>3. 告発</b><br>犯人の嘘と証拠の矛盾を見抜け。
+            </div>
+            <div style="margin-top:40px; font-size:18px; color:#d4af37;">まもなく捜査が開始されます...</div>
+        </div>
+    </div>
+    <div id="game-container" style="opacity:0; transition:opacity 1s;">
+        <header>
+            <h1 id="case-title"></h1>
+            <div id="case-details" class="details-badge"></div>
+            <div id="case-summary" class="summary"></div>
+        </header>
+        <div id="suspects-area">
+            <div id="card-0" class="suspect-card"><div class="suspect-name">A</div><div class="suspect-stmt">...</div></div>
+            <div id="card-1" class="suspect-card"><div class="suspect-name">B</div><div class="suspect-stmt">...</div></div>
+            <div id="card-2" class="suspect-card"><div class="suspect-name">C</div><div class="suspect-stmt">...</div></div>
+            <div id="card-3" class="suspect-card"><div class="suspect-name">D</div><div class="suspect-stmt">...</div></div>
+        </div>
+        <div id="left-panel">
+            <div class="panel-title">証拠品リスト</div>
+            <div id="evidence-list"></div>
+            <div class="panel-title" style="margin-top:10px;">通信ログ</div>
+            <div id="log-area"></div>
+        </div>
+        <div id="right-panel">
+            <div class="panel-title">⚠️ 重要証言ファイル</div>
+            <div id="key-testimony-list"></div>
+        </div>
+    </div>
+    <div id="result-overlay" class="overlay hidden">
+        <h1 id="result-title" style="font-size:50px; color:#d4af37;"></h1>
+        <div id="result-content">
+            <div class="result-label">犯人</div>
+            <div id="res-liar" class="result-text" style="font-size:30px; font-weight:bold;"></div>
+            <div class="result-label">事件の全貌・解説</div>
+            <div id="res-explanation" class="result-text"></div>
+        </div>
+        <div style="margin-top:20px; font-size:14px; color:#666;">スマホの「次の事件へ」ボタンを押してください</div>
+    </div>
+
+    <script type="module">
+        import { io } from "https://cdn.socket.io/4.5.1/socket.io.esm.min.js";
+        let socket;
+        let pointerX = 0;
+        let lastSelected = -1;
+        const bgm = new Audio('iwakan_Loop.ogg');
+        bgm.loop = true;
+        bgm.volume = 0.5;
+        const seType = new Audio('メッセージ表示音1.mp3');
+        seType.volume = 0.6;
+        const seKey = new Audio('ビープ音5.mp3');
+        seKey.volume = 0.8;
+        const seCursor = new Audio('カーソル移動2.mp3');
+        seCursor.volume = 0.6;
+
+        window.setup = function() {
+            createCanvas(windowWidth, windowHeight).style('z-index', '-1').style('position','fixed').style('top','0');
+            socket = io();
+            socket.on('connect', () => socket.emit('join', 'game'));
+
+            socket.on('phase_change', (phase) => {
+                const intro = document.getElementById('intro-overlay');
+                const tutorial = document.getElementById('tutorial-overlay');
+                const game = document.getElementById('game-container');
+                const result = document.getElementById('result-overlay');
+
+                if(phase === 'WAITING_START') {
+                    resetUI();
+                    intro.classList.remove('hidden');
+                    tutorial.classList.add('hidden');
+                    game.style.opacity = 0;
+                    result.classList.add('hidden');
+                    bgm.pause(); bgm.currentTime = 0;
+                } else if(phase === 'TUTORIAL') {
+                    intro.classList.add('hidden');
+                    tutorial.classList.remove('hidden');
+                    game.style.opacity = 0;
+                } else if(phase === 'ASKING') {
+                    intro.classList.add('hidden');
+                    tutorial.classList.add('hidden');
+                    game.style.opacity = 1;
+                    bgm.play().catch(e => console.warn("Auto-play blocked"));
+                } else if(phase === 'RESULT') {
+                    bgm.pause();
+                }
+            });
+
+            socket.on('game_data', (data) => {
+                document.getElementById('case-title').innerText = data.theme;
+                document.getElementById('case-details').innerText = data.details || "詳細不明";
+                document.getElementById('case-summary').innerText = data.summary;
+                const evList = document.getElementById('evidence-list');
+                evList.innerHTML = '';
+                if(data.evidences) data.evidences.forEach(e => evList.innerHTML += `<div class="evidence-card">${e}</div>`);
+                if(data.statements) {
+                    data.statements.forEach((p, i) => {
+                        const card = document.getElementById(`card-${i}`);
+                        if(card) card.querySelector('.suspect-stmt').innerText = p.statement || p.text;
+                    });
+                }
+            });
+
+            socket.on('pointer_update', (data) => pointerX = lerp(pointerX, data.x, 0.2));
+            socket.on('question_processing', (data) => addLog(`質問[${data.target}]: ${data.text}`, 'q'));
+            socket.on('question_result', (data) => {
+                seType.currentTime = 0;
+                seType.play().catch(()=>{});
+                addLog(`[${data.target}] ${data.a}`, 'a');
+                if(data.isKey) {
+                    seKey.currentTime = 0;
+                    seKey.play().catch(()=>{});
+                    const list = document.getElementById('key-testimony-list');
+                    const div = document.createElement('div');
+                    div.className = 'key-item';
+                    div.innerHTML = `<div class="key-target">${data.target}の証言</div><div class="key-text">${data.a}</div>`;
+                    list.insertBefore(div, list.firstChild);
+                }
+            });
+            socket.on('game_over', (data) => {
+                document.getElementById('result-overlay').classList.remove('hidden');
+                document.getElementById('result-title').innerText = data.result === 'WIN' ? "真相解明" : "迷宮入り...";
+                document.getElementById('res-liar').innerText = data.liar;
+                document.getElementById('res-explanation').innerText = data.explanation || "解説なし";
+            });
+            socket.on('reset', () => window.location.reload());
+        };
+
+        window.draw = function() {
+            clear();
+            let mapped = map(pointerX, -1, 1, 0, 4);
+            let currentSelected = -1;
+            for(let i=0; i<4; i++) {
+                const card = document.getElementById(`card-${i}`);
+                if(card) {
+                    if(mapped >= i && mapped < i+1) {
+                        card.classList.add('selected');
+                        currentSelected = i;
+                    } else {
+                        card.classList.remove('selected');
+                    }
+                }
+            }
+            if (currentSelected !== -1 && currentSelected !== lastSelected) {
+                seCursor.currentTime = 0;
+                seCursor.play().catch(()=>{});
+                lastSelected = currentSelected;
+            }
+        };
+
+        function addLog(msg, type) {
+            const div = document.createElement('div');
+            div.className = `log-entry log-${type}`;
+            div.innerText = msg;
+            const area = document.getElementById('log-area');
+            area.appendChild(div);
+            area.scrollTop = area.scrollHeight;
+        }
+
+        function resetUI() {
+            document.getElementById('key-testimony-list').innerHTML = '';
+            document.getElementById('log-area').innerHTML = '';
+        }
+        window.windowResized = () => resizeCanvas(windowWidth, windowHeight);
+    </script>
+</body>
+</html>
